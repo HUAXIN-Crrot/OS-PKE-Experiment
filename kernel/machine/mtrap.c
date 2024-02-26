@@ -1,18 +1,66 @@
 #include "kernel/riscv.h"
 #include "kernel/process.h"
 #include "spike_interface/spike_utils.h"
+#include "spike_interface/spike_file.h"
+#include "string.h"
 
-static void handle_instruction_access_fault() { panic("Instruction access fault!"); }
 
-static void handle_load_access_fault() { panic("Load access fault!"); }
+char path[300];
+char content[8000];
+struct stat f_stat;
 
-static void handle_store_access_fault() { panic("Store/AMO access fault!"); }
+void bug_print(){
+  uint64 bug_addr = read_csr(mepc);
+  addr_line * bug_line = NULL;
+  char * bug_line_dir = NULL;
+  int dir_len = 0;
 
-static void handle_illegal_instruction() { panic("Illegal instruction!"); }
+  //find the bug line
+  for(int i = 0;i < current->line_ind;i++){
+    if(bug_addr < current->line[i].addr){
+      bug_line = current->line + i - 1;
 
-static void handle_misaligned_load() { panic("Misaligned Load!"); }
+       //find the full path of the file
+      bug_line_dir = current->dir[current->file[bug_line->file].dir];
+      strcpy(path,bug_line_dir);
+      dir_len = strlen(bug_line_dir);
+      path[dir_len] = '/';
+      strcpy(path+dir_len+1, current->file[bug_line->file].file);
 
-static void handle_misaligned_store() { panic("Misaligned AMO!"); }
+      //find the exception line and print
+      spike_file_t * bug_file = spike_file_open(path,O_RDONLY,0);
+      spike_file_stat(bug_file, &f_stat);
+      spike_file_read(bug_file,content,f_stat.st_size);
+      int off = 0, count = 0;
+      while(off < f_stat.st_size){
+      int tmp = off;
+      while(tmp < f_stat.st_size && content[tmp] != '\n') tmp++;
+      if(count == bug_line->line - 1){
+        content[tmp] = '\0';
+        sprint("Runtime error at %s:%d\n%s\n",path, bug_line->line, content + off);
+        break;
+      }
+      else{
+      count++;
+      off = tmp + 1;
+        }
+      }
+      break;
+    }
+  }
+}
+
+static void handle_instruction_access_fault() { bug_print();panic("Instruction access fault!"); }
+
+static void handle_load_access_fault() { bug_print();panic("Load access fault!"); }
+
+static void handle_store_access_fault() { bug_print();panic("Store/AMO access fault!"); }
+
+static void handle_illegal_instruction() { bug_print();panic("Illegal instruction!"); }
+
+static void handle_misaligned_load() { bug_print();panic("Misaligned Load!"); }
+
+static void handle_misaligned_store() { bug_print();panic("Misaligned AMO!"); }
 
 // added @lab1_3
 static void handle_timer() {

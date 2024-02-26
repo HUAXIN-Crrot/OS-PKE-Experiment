@@ -195,6 +195,39 @@ endop:;
 }
 
 //
+// find debug_line
+//
+char buf_debug_line[9000];
+void get_debug_line(elf_ctx *ctx){
+  elf_sect_header shstr_sh;
+  elf_sect_header tmp_sh;
+  elf_sect_header debug_line_sh;
+
+  //find shstrtab
+  uint64 shstr_off = ctx->ehdr.shoff + ctx->ehdr.shstrndx * sizeof(elf_sect_header);
+  //read shstrtab
+  elf_fpread(ctx,(void*)&shstr_sh,sizeof(shstr_sh),shstr_off);
+  //read content of the shstrtab
+  char tmp_str[shstr_sh.size];
+  elf_fpread(ctx,&tmp_str,shstr_sh.size,shstr_sh.offset);
+
+  //find debug_line
+  for(int i = 0;i < ctx->ehdr.shnum;i++){
+    //read every section
+    elf_fpread(ctx,(void*)&tmp_sh,sizeof(tmp_sh),ctx->ehdr.shoff + i * ctx->ehdr.shentsize);
+
+    if(strcmp(tmp_str+tmp_sh.name,".debug_line") == 0){
+      sprint("find the debug_line %s \n",tmp_str + tmp_sh.name );
+      debug_line_sh = tmp_sh;
+      break;
+    }
+  }
+  elf_fpread(ctx,(void*)&buf_debug_line,debug_line_sh.size,debug_line_sh.offset);
+  make_addr_line(ctx,buf_debug_line,debug_line_sh.size);
+}
+
+
+//
 // load the elf segments to memory regions as we are in Bare mode in lab1
 //
 elf_status elf_load(elf_ctx *ctx) {
@@ -277,11 +310,17 @@ void load_bincode_from_host_elf(process *p) {
   // load elf. elf_load() is defined above.
   if (elf_load(&elfloader) != EL_OK) panic("Fail on loading elf.\n");
 
+  
+
   // entry (virtual, also physical in lab1_x) address
   p->trapframe->epc = elfloader.ehdr.entry;
+
+  //find debug_line
+  get_debug_line(&elfloader);
 
   // close the host spike file
   spike_file_close( info.f );
 
   sprint("Application program entry point (virtual address): 0x%lx\n", p->trapframe->epc);
 }
+
