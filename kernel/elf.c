@@ -13,6 +13,11 @@ typedef struct elf_info_t {
   process *p;
 } elf_info;
 
+//this is for symbols
+elf_symbol symbols[64];
+char sym_names[64][32];
+int sym_count;
+
 //
 // the implementation of allocater. allocates memory space for later segment loading
 //
@@ -101,6 +106,77 @@ static size_t parse_args(arg_buf *arg_bug_msg) {
   return pk_argc - arg;
 }
 
+void get_func_name(elf_ctx *ctx){
+  elf_sect_header sym_sh;
+  elf_sect_header str_sh;
+  elf_sect_header shstr_sh;
+  elf_sect_header tmp_sh;
+
+ // sprint("This is get_func_name!\n");
+
+  
+  //find the shstrtab
+  uint64 shstr_off = ctx->ehdr.shoff + ctx->ehdr.shstrndx * sizeof(elf_sect_header);
+  //read the shstrtab
+  elf_fpread(ctx,(void*)&shstr_sh,sizeof(shstr_sh),shstr_off);
+  //read the content of the shstrtab
+  char tmp_str[shstr_sh.sh_size];
+  elf_fpread(ctx,&tmp_str,shstr_sh.sh_size,shstr_sh.sh_offset);
+
+  //sprint("The num of the sections:%d\n",ctx->ehdr.shnum);
+  //find the strtab and the symtab
+  for(int i = 0;i < ctx->ehdr.shnum;i++){
+    //read evert section
+    //sprint("Testing!\n");
+    elf_fpread(ctx,(void*)&tmp_sh,sizeof(tmp_sh),ctx->ehdr.shoff + i * ctx->ehdr.shentsize);
+    uint32 type = tmp_sh.sh_type;
+   // sprint("The type of the section:%d\n",tmp_sh.sh_type);
+    if(type == 2){  //SHT_SYMTAB == 2
+      sym_sh = tmp_sh;        
+    }else if(type == 3){  //SHT_STRTAB == 3   
+     if(strcmp(tmp_str+tmp_sh.sh_name,".strtab") == 0){
+      str_sh = tmp_sh;
+     }
+    }       
+  }
+
+  //find all sections symbols
+  uint64 sym_num = sym_sh.sh_size / sizeof(elf_symbol);
+  int count = 0;
+  for(int i = 0;i < sym_num;i++){
+    elf_symbol symbol;
+    elf_fpread(ctx,(void*)&symbol,sizeof(symbol),sym_sh.sh_offset+i*sizeof(elf_symbol));
+    if(symbol.st_name == 0) continue;
+    if(symbol.st_info == 18){ //STT_FUC
+      char name[32];
+      elf_fpread(ctx,(void*)&name,sizeof(name),str_sh.sh_offset+symbol.st_name);
+      symbols[count++] = symbol;
+      //sprint("%s  %x  %x\n",name,symbol.st_value, symbol.st_value + symbol.st_size);
+      strcpy(sym_names[count-1],name);
+    }
+  }
+  sym_count = count;
+}
+
+//this function is for printing symblos
+int elf_print_backtrace(uint64 depth, uint64 trace_ra){
+  //sprint("This is elf_print_backtrace!\n");
+  uint64 ret_addr = trace_ra;
+  int j = 0;
+  for(;j < depth;j++){
+    int i = 0;
+    for(;i < sym_count;i++){
+      uint64 func_addr = *(uint64*)ret_addr;
+      if(func_addr >= symbols[i].st_value && func_addr < symbols[i].st_value + symbols[i].st_size){
+        sprint("%s\n",sym_names[i]);
+        break;
+      }
+    }
+    ret_addr = ret_addr + 16;
+  }
+  return j;
+}
+
 //
 // load the elf of user application, by using the spike file interface.
 //
@@ -130,6 +206,9 @@ void load_bincode_from_host_elf(process *p) {
   // load elf. elf_load() is defined above.
   if (elf_load(&elfloader) != EL_OK) panic("Fail on loading elf.\n");
 
+  //get the elf_header
+  get_func_name(&elfloader);
+
   // entry (virtual, also physical in lab1_x) address
   p->trapframe->epc = elfloader.ehdr.entry;
 
@@ -138,3 +217,4 @@ void load_bincode_from_host_elf(process *p) {
 
   sprint("Application program entry point (virtual address): 0x%lx\n", p->trapframe->epc);
 }
+
