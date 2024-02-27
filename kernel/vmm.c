@@ -5,6 +5,7 @@
 #include "vmm.h"
 #include "riscv.h"
 #include "pmm.h"
+#include "process.h"
 #include "util/types.h"
 #include "memlayout.h"
 #include "util/string.h"
@@ -189,5 +190,81 @@ void user_vm_unmap(pagetable_t page_dir, uint64 va, uint64 size, int free) {
   pte_t* PTE = page_walk(page_dir,va,0);
   free_page((void*)((*PTE >> 10)<<12));
   *PTE &= (~PTE_V);
+}
 
+
+
+//init the first block
+uint64 first_blcok = 1;
+struct MCB * mcb_head = NULL;
+uint64 cur_malloc = USER_FREE_ADDRESS_START; // the origin malloc addr
+
+//turn va to pa
+void va_malloc(uint64 n){
+  uint64 tmp = ROUNDUP(cur_malloc, PGSIZE);
+  //sprint("This is tmpaddr:0x%x  %x %x %x\n",tmp,cur_malloc,n,PGSIZE);
+  char * mem;
+  for(uint64 i = tmp;i < (cur_malloc + n);i += PGSIZE){
+    //sprint("i: %x  %x\n",i, cur_malloc + n);
+    mem = (char *)alloc_page();
+    memset(mem,0,(size_t)PGSIZE);
+    map_pages(current->pagetable,tmp,PGSIZE,(uint64)mem,prot_to_type(PROT_READ | PROT_WRITE,1));
+  }
+  cur_malloc += n;
+  return ;
+}
+
+void init_MCB(){
+  if(first_blcok){
+    first_blcok = 0;
+    //sprint("Start the first mapping!\n");
+    va_malloc(sizeof(mcb));
+    //sprint("The first mapping is success!\n");
+    pte_t *pte = page_walk(current->pagetable,USER_FREE_ADDRESS_START,0);
+    mcb_head = (mcb*)PTE2PA(*pte);
+    mcb_head->flag = 0;
+    mcb_head->addr = *pte + sizeof(mcb);
+    mcb_head->size = 0;
+    mcb_head->next = NULL;
+    return ;
+  }
+  return ;
+}
+
+uint64 sys_better_malloc(uint64 n){
+  init_MCB();
+  mcb *cur = (mcb*)mcb_head;
+  while(1){
+    if(cur->size >= n && cur->flag == 0){
+      cur->flag = 1;
+      return cur->addr;
+    }
+    if(cur->next == NULL) break;
+    cur = cur->next;
+  }
+  uint64 top = cur_malloc;
+  va_malloc(sizeof(mcb) + n);
+  pte_t *pte = page_walk(current->pagetable,top,0);
+  mcb * new_b = (mcb*)(PTE2PA(*pte) + (top & 0xfff));
+  //make addr align
+  uint64 align = (uint64)new_b % 8;
+  new_b = (mcb*)((uint64)new_b + 8 - align);
+
+  new_b->flag = 1;
+  new_b->size = n;
+  new_b->addr = top + sizeof(mcb);
+  new_b->next = cur->next;
+  cur->next = new_b;
+
+  return new_b->addr;
+}
+
+void sys_better_free(uint64 va){
+  void *free_addr = (void*)((uint64)va - sizeof(mcb));
+  pte_t *pte = page_walk(current->pagetable,(uint64)(free_addr), 0);
+  mcb *free_b = (mcb*)(PTE2PA(*pte) + ((uint64)free_addr & 0xfff));
+  uint64 align = (uint64)free_b % 8;
+  free_b = (mcb*)((uint64)free_b + 8 - align);
+  free_b->flag = 0;
+  return ;
 }
