@@ -80,6 +80,24 @@ struct file *get_opened_file(int fd) {
 // return: -1 on failure; non-zero file-descriptor on success.
 //
 int do_open(char *pathname, int flags) {
+  //sprint("This is the origin pathname:%s\n",pathname);
+  //change relative road path
+  if(pathname[0] == '.' && pathname[1] == '/'){
+    char new_path [100];
+    char tmp[100];
+    int pos = 0;
+    int len = 0; //the length of cwd->name
+    strcpy(new_path,current->pfiles->cwd->name);
+    len = strlen(new_path);
+    new_path[len] = '/';
+    new_path[len+1] = '\0';
+    for(int i = 2;i <= strlen(pathname);i++){
+      tmp[pos++] = pathname[i];
+    }
+    strcat(new_path,tmp);
+    pathname = new_path;
+    //sprint("This is after_pathname:%s\n",pathname);
+  }
   struct file *opened_file = NULL;
   if ((opened_file = vfs_open(pathname, flags)) == NULL) return -1;
 

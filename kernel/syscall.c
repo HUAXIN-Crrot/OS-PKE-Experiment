@@ -93,6 +93,7 @@ ssize_t sys_user_yield() {
   current->status=READY;
   insert_to_ready_queue(current);
   schedule();
+
   return 0;
 }
 
@@ -214,6 +215,41 @@ ssize_t sys_user_unlink(char * vfn){
   return do_unlink(pfn);
 }
 
+ssize_t sys_user_rcwd(char* path){
+  //read current path
+  char * pfn = (char*)user_va_to_pa((pagetable_t)(current->pagetable), (void*)path);
+  strcpy(pfn,current->pfiles->cwd->name);
+  return 1;
+}
+
+ssize_t sys_user_ccwd(char* path){
+  //sprint("This is sys_user_ccwd!\n");
+  //change current path
+  //relative-path = "./ ..."
+  char new_path [100];
+  char tmp [100];
+  int pos = 0;
+  char * pathpa = (char*)user_va_to_pa((pagetable_t)(current->pagetable),(void*)path);
+  strcpy(new_path,current->pfiles->cwd->name);
+  if(pathpa[0] == '.' && pathpa[1] == '/'){
+    for(int i = 2;i <= strlen(pathpa);i++){
+      tmp[pos++] = pathpa[i];
+    }
+    strcat(new_path, tmp);
+  }else{
+    int j = strlen(new_path-1);
+    for(;;j--){
+      if(new_path[j] == '/'){
+        break;
+      }
+    }
+    new_path[j+1] = '\0';
+  }
+  //sprint("This is new_path:%s\n",new_path);
+  strcpy(current->pfiles->cwd->name,new_path);
+  return 0;
+}
+
 //
 // [a0]: the syscall number; [a1] ... [a7]: arguments to the syscalls.
 // returns the code of success, (e.g., 0 means success, fail for otherwise)
@@ -262,6 +298,10 @@ long do_syscall(long a0, long a1, long a2, long a3, long a4, long a5, long a6, l
       return sys_user_link((char *)a1, (char *)a2);
     case SYS_user_unlink:
       return sys_user_unlink((char *)a1);
+    case SYS_user_rcwd:
+      return sys_user_rcwd((char*)a1);
+    case SYS_user_ccwd:
+      return sys_user_ccwd((char*)a1);
     default:
       panic("Unknown syscall %ld \n", a0);
   }
