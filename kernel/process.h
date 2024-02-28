@@ -102,6 +102,11 @@ process* alloc_process();
 int free_process( process* proc );
 // fork a child from parent
 int do_fork(process* parent);
+// parent process wait
+int do_wait(int pid);
+
+//To see if child's parent process is blocked
+void check_parent(int parent_pid, int child_pid);
 
 // current running process
 extern process* current;

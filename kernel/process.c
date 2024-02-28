@@ -183,6 +183,7 @@ int do_fork( process* parent)
   for( int i=0; i<parent->total_mapped_region; i++ ){
     // browse parent's vm space, and copy its trapframe and data segments,
     // map its code segment.
+    int free_block_filter[MAX_HEAP_PAGES];
     switch( parent->mapped_info[i].seg_type ){
       case CONTEXT_SEGMENT:
         *child->trapframe = *parent->trapframe;
@@ -196,7 +197,6 @@ int do_fork( process* parent)
 
         // convert free_pages_address into a filter to skip reclaimed blocks in the heap
         // when mapping the heap blocks
-        int free_block_filter[MAX_HEAP_PAGES];
         memset(free_block_filter, 0, MAX_HEAP_PAGES);
         uint64 heap_bottom = parent->user_heap.heap_bottom;
         for (int i = 0; i < parent->user_heap.free_pages_count; i++) {
@@ -231,16 +231,15 @@ int do_fork( process* parent)
         // address region of child to the physical pages that actually store the code
         // segment of parent process.
         // DO NOT COPY THE PHYSICAL PAGES, JUST MAP THEM.
-         map_pages(
-          child->pagetable,
-          parent->mapped_info[i].va,
-          parent->mapped_info[i].npages*PGSIZE,
-          lookup_pa(parent->pagetable,
-          parent->mapped_info[i].va),
-          prot_to_type(
-            PROT_EXEC|PROT_READ,1
-        ));
+        for( int j=0; j<parent->mapped_info[i].npages; j++ ){
+            uint64 addr = lookup_pa(parent->pagetable, parent->mapped_info[i].va+j*PGSIZE);
 
+            map_pages(child->pagetable, parent->mapped_info[i].va+j*PGSIZE, PGSIZE,
+                    addr, prot_to_type(PROT_WRITE | PROT_READ | PROT_EXEC, 1));
+
+            sprint( "do_fork map code segment at pa:%lx of parent to child at va:%lx.\n",
+                    addr, parent->mapped_info[i].va+j*PGSIZE );
+        }
         // after mapping, register the vm region (do not delete codes below!)
         child->mapped_info[child->total_mapped_region].va = parent->mapped_info[i].va;
         child->mapped_info[child->total_mapped_region].npages =
@@ -248,6 +247,22 @@ int do_fork( process* parent)
         child->mapped_info[child->total_mapped_region].seg_type = CODE_SEGMENT;
         child->total_mapped_region++;
         break;
+      case DATA_SEGMENT:
+           for( int j=0; j<parent->mapped_info[i].npages; j++ ){
+            uint64 addr = lookup_pa(parent->pagetable, parent->mapped_info[i].va+j*PGSIZE);
+            char *newaddr = alloc_page(); 
+            memcpy(newaddr, (void *)addr, PGSIZE);
+            map_pages(child->pagetable, parent->mapped_info[i].va+j*PGSIZE, PGSIZE,
+                    (uint64)newaddr, prot_to_type(PROT_WRITE | PROT_READ, 1));
+        }
+        // after mapping, register the vm region (do not delete codes below!)
+        child->mapped_info[child->total_mapped_region].va = parent->mapped_info[i].va;
+        child->mapped_info[child->total_mapped_region].npages =
+          parent->mapped_info[i].npages;
+        child->mapped_info[child->total_mapped_region].seg_type = DATA_SEGMENT;
+        child->total_mapped_region++;
+        break;
+        
     }
   }
 
@@ -258,3 +273,57 @@ int do_fork( process* parent)
 
   return child->pid;
 }
+
+int do_wait(int pid){
+  //invaild pid number
+  if(pid == 0 || pid < -1 || pid >= NPROC)
+    return -1;
+  bool find_child = FALSE;
+  if(pid == -1){
+    for(int i = 0;i < NPROC;i++){
+      if(procs[i].parent == current){
+        find_child = TRUE;
+        if(procs[i].status == ZOMBIE){
+          procs[i].status = FREE;
+          return i;
+        }
+      }
+    }
+    //not child process
+    if(!find_child){
+      return -1;
+    }else{
+      //find the child process but it is still running
+      //turn parent process into blocked state
+      current->status = BLOCKED;
+      schedule();
+      return -1;
+    }
+  }else{
+    //not this parent process
+    if(procs[pid].parent != current)
+      return -1;
+    if(procs[pid].status == ZOMBIE){
+      procs[pid].status = FREE;
+      return pid;
+    }else{
+      current->status = BLOCKED;
+      schedule();
+      return -1;
+    }
+  }
+  return -1;
+}
+
+void check_parent(int parent_pid, int child_pid){
+  if(procs[parent_pid].status == BLOCKED){
+      procs[parent_pid].status = READY;
+      //return the child's pid
+     // procs[parent_pid].trapframe->regs.a0 = child_pid;
+      insert_to_ready_queue(&procs[parent_pid]);
+  }
+}
+
+
+    
+
