@@ -22,6 +22,8 @@ typedef struct trapframe_t {
 #define NPROC 32
 // maximum number of pages in a process's heap
 #define MAX_HEAP_PAGES 32
+//macimun number of sem queue
+#define MAX_SEM 32
 
 // possible status of a process
 enum proc_status {
@@ -91,6 +93,26 @@ typedef struct process_t {
   int tick_count;
 }process;
 
+// sem to control the process
+
+typedef struct SEM
+{
+  int flag; // be used or not
+  int value;
+  process *p_queue;
+}Sem;
+
+//sem control
+int p_sys_sem_new(int n);
+
+int p_sys_sem_P(int n);
+
+int p_sys_sem_V(int n);
+
+//init sem
+void init_Sem_pool();
+
+
 // switch to run user app
 void switch_to(process*);
 
@@ -105,5 +127,6 @@ int do_fork(process* parent);
 
 // current running process
 extern process* current;
+
 
 #endif

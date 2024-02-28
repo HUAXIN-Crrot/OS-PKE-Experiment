@@ -28,6 +28,8 @@ extern char trap_sec_start[];
 
 // process pool. added @lab3_1
 process procs[NPROC];
+//sem pool
+Sem Sems[MAX_SEM];
 
 // current points to the currently running user-mode application.
 process* current = NULL;
@@ -81,6 +83,64 @@ void init_proc_pool() {
     procs[i].pid = i;
   }
 }
+
+//
+//initialize Sem pool
+//
+void init_Sem_pool(){
+  memset(Sems, 0, sizeof(Sem)*MAX_SEM);
+
+  for(int i = 0;i < MAX_SEM;i++){
+    Sems[i].flag = 0;
+    Sems[i].value = 0;
+    Sems[i].p_queue = NULL;
+  }
+}
+
+//
+// Sem control function
+//
+int p_sys_sem_new(int n){
+  for(int i = 0;i < MAX_SEM;i++){
+    if(Sems[i].flag == 0){
+      Sems[i].value = n;
+      Sems[i].flag = 1;
+      return i;
+    }
+  }
+  return -1;
+}
+
+int p_sys_sem_P(int n){
+  Sems[n].value--;
+  if(Sems[n].value < 0){
+    if(Sems[n].p_queue == NULL){
+      Sems[n].p_queue = current;
+      current->queue_next = NULL;
+    }else{
+      process *tmp = Sems[n].p_queue;
+      while(tmp->queue_next){
+        tmp = tmp->queue_next;
+      }
+      tmp->queue_next = current->queue_next;
+    }
+    current->status = BLOCKED;
+    schedule();
+  }
+  return 0;
+}
+
+int p_sys_sem_V(int n){
+  Sems[n].value++;
+  if(Sems[n].p_queue){
+    process *tmp = Sems[n].p_queue;
+    Sems[n].p_queue = tmp->queue_next;
+    insert_to_ready_queue(tmp);
+  }
+  return 0;
+}
+
+
 
 //
 // allocate an empty process, init its vm space. returns the pointer to
