@@ -9,9 +9,11 @@
 #include "vmm.h"
 #include "pmm.h"
 #include "spike_interface/spike_utils.h"
+#include "vfs.h"
 
 typedef struct elf_info_t {
-  spike_file_t *f;
+  //spike_file_t *f;
+  struct file *f;
   process *p;
 } elf_info;
 
@@ -36,13 +38,21 @@ static void *elf_alloc_mb(elf_ctx *ctx, uint64 elf_pa, uint64 elf_va, uint64 siz
 //
 // actual file reading, using the spike file interface.
 //
+/*
 static uint64 elf_fpread(elf_ctx *ctx, void *dest, uint64 nb, uint64 offset) {
   elf_info *msg = (elf_info *)ctx->info;
   // call spike file utility to load the content of elf file into memory.
   // spike_file_pread will read the elf file (msg->f) from offset to memory (indicated by
   // *dest) for nb bytes.
   return spike_file_pread(msg->f, dest, nb, offset);
+}*/
+
+static uint64 elf_fpread_vfs(elf_ctx *ctx, void *dest, uint64 nb, uint64 offset){
+  elf_info *msg = (elf_info *) ctx->info;
+  vfs_lseek(msg->f, offset, SEEK_SET);
+  return vfs_read(msg->f, (char *)dest, nb);
 }
+
 
 //
 // init elf_ctx, a data structure that loads the elf.
@@ -51,7 +61,7 @@ elf_status elf_init(elf_ctx *ctx, void *info) {
   ctx->info = info;
 
   // load the elf header
-  if (elf_fpread(ctx, &ctx->ehdr, sizeof(ctx->ehdr), 0) != sizeof(ctx->ehdr)) return EL_EIO;
+  if (elf_fpread_vfs(ctx, &ctx->ehdr, sizeof(ctx->ehdr), 0) != sizeof(ctx->ehdr)) return EL_EIO;
 
   // check the signature (magic value) of the elf
   if (ctx->ehdr.magic != ELF_MAGIC) return EL_NOTELF;
@@ -70,7 +80,9 @@ elf_status elf_load(elf_ctx *ctx) {
   // traverse the elf program segment headers
   for (i = 0, off = ctx->ehdr.phoff; i < ctx->ehdr.phnum; i++, off += sizeof(ph_addr)) {
     // read segment headers
-    if (elf_fpread(ctx, (void *)&ph_addr, sizeof(ph_addr), off) != sizeof(ph_addr)) return EL_EIO;
+    if (elf_fpread_vfs(ctx, (void *)&ph_addr, sizeof(ph_addr), off) != sizeof(ph_addr)) return EL_EIO;
+
+    //sprint("This is the type of ph_addr:%d ehdr.phnum:%d\n",ph_addr.type,ctx->ehdr.phnum);
 
     if (ph_addr.type != ELF_PROG_LOAD) continue;
     if (ph_addr.memsz < ph_addr.filesz) return EL_ERR;
@@ -80,14 +92,17 @@ elf_status elf_load(elf_ctx *ctx) {
     void *dest = elf_alloc_mb(ctx, ph_addr.vaddr, ph_addr.vaddr, ph_addr.memsz);
 
     // actual loading
-    if (elf_fpread(ctx, dest, ph_addr.memsz, ph_addr.off) != ph_addr.memsz)
+    if (elf_fpread_vfs(ctx, dest, ph_addr.memsz, ph_addr.off) != ph_addr.memsz)
       return EL_EIO;
 
     // record the vm region in proc->mapped_info. added @lab3_1
     int j;
-    for( j=0; j<PGSIZE/sizeof(mapped_region); j++ ) //seek the last mapped region
+    //seek the last mapped region
+    for( j=0; j<PGSIZE/sizeof(mapped_region); j++ ){
+      //sprint(" id: %d This is the type of process segment:%d\n",j,((process*)(((elf_info*)(ctx->info))->p))->mapped_info[j].seg_type);
       if( (process*)(((elf_info*)(ctx->info))->p)->mapped_info[j].va == 0x0 ) break;
-
+    } 
+     
     ((process*)(((elf_info*)(ctx->info))->p))->mapped_info[j].va = ph_addr.vaddr;
     ((process*)(((elf_info*)(ctx->info))->p))->mapped_info[j].npages = 1;
 
@@ -150,10 +165,12 @@ void load_bincode_from_host_elf(process *p) {
   // elf_info is defined above, used to tie the elf file and its corresponding process.
   elf_info info;
 
-  info.f = spike_file_open(arg_bug_msg.argv[0], O_RDONLY, 0);
+  //info.f = spike_file_open(arg_bug_msg.argv[0], O_RDONLY, 0);
+  info.f = vfs_open(arg_bug_msg.argv[0], O_RDONLY);
   info.p = p;
   // IS_ERR_VALUE is a macro defined in spike_interface/spike_htif.h
-  if (IS_ERR_VALUE(info.f)) panic("Fail on openning the input application program.\n");
+  //if (IS_ERR_VALUE(info.f)) panic("Fail on openning the input application program.\n");
+  if(info.f == NULL) panic("Fail on openning the input application program.\n");
 
   // init elfloader context. elf_init() is defined above.
   if (elf_init(&elfloader, &info) != EL_OK)
@@ -166,7 +183,47 @@ void load_bincode_from_host_elf(process *p) {
   p->trapframe->epc = elfloader.ehdr.entry;
 
   // close the host spike file
-  spike_file_close( info.f );
+  vfs_close(info.f);
 
   sprint("Application program entry point (virtual address): 0x%lx\n", p->trapframe->epc);
+}
+
+int sys_exec(const char * addr){
+  //sprint("This is exec!\n");
+  elf_ctx elfloader;
+  elf_info info;
+
+  //open the ELF_file
+  info.f = vfs_open(addr, O_RDONLY);
+  info.p = current;
+  if(info.f == NULL){
+    sprint("EXEC:Fail on openning the input application program.\n");
+    return -1;
+    }
+
+  // init elfloader context. elf_init() is defined above.
+  if (elf_init(&elfloader, &info) != EL_OK){
+    sprint("EXEC: fail to init elfloader.\n");
+    return -1;
+  }
+
+  // clear the origin segment
+  for(int j = 4;j < current->total_mapped_region;j++){
+    //sprint("This is clearing pages: %d\n", j);
+    user_vm_unmap(current->pagetable, current->mapped_info[j].va, current->mapped_info[j].npages * PGSIZE, 0);
+  }
+  //current->total_mapped_region = 4;
+    
+
+  // load elf. elf_load() is defined above.
+  if (elf_load(&elfloader) != EL_OK) panic("Fail on loading elf.\n");
+
+  // entry (virtual, also physical in lab1_x) address
+  current->trapframe->epc = elfloader.ehdr.entry;
+
+  // close the host spike file
+  vfs_close(info.f);
+
+  sprint("Application program entry point (virtual address): 0x%lx\n", current->trapframe->epc);
+  return 1;
 }

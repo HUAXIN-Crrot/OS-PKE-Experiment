@@ -167,3 +167,10 @@ int unlink_u(const char *fn){
 int close(int fd) {
   return do_user_call(SYS_user_close, fd, 0, 0, 0, 0, 0, 0);
 }
+
+//
+//run a software in another process
+//
+int exec(const char * addr){
+  return do_user_call(SYS_user_exec, (uint64)addr, 0, 0, 0, 0, 0, 0);
+}
