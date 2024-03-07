@@ -10,20 +10,23 @@
 #include "vmm.h"
 #include "memlayout.h"
 #include "spike_interface/spike_utils.h"
+#include "sync_utils.h"
 
 // process is a structure defined in kernel/process.h
-process user_app;
+
 
 //
 // trap_sec_start points to the beginning of S-mode trap segment (i.e., the entry point of
 // S-mode trap vector). added @lab2_1
 //
 extern char trap_sec_start[];
+int counter_k = 0;
 
 //
 // turn on paging. added @lab2_1
 //
 void enable_paging() {
+  int id = read_tp();
   // write the pointer to kernel page (table) directory into the CSR of "satp".
   write_csr(satp, MAKE_SATP(g_kernel_pagetable));
 
@@ -36,6 +39,7 @@ void enable_paging() {
 // load_bincode_from_host_elf is defined in elf.c
 //
 void load_user_program(process *proc) {
+  uint64 id = read_tp();
   sprint("User application is loading.\n");
   // allocate a page to store the trapframe. alloc_page is defined in kernel/pmm.c. added @lab2_1
   proc->trapframe = (trapframe *)alloc_page();
@@ -50,9 +54,11 @@ void load_user_program(process *proc) {
   uint64 user_stack = (uint64)alloc_page();       //phisical address of user stack bottom
 
   // USER_STACK_TOP = 0x7ffff000, defined in kernel/memlayout.h
-  proc->trapframe->regs.sp = USER_STACK_TOP;  //virtual address of user stack top
+  proc->trapframe->regs.sp = ( USER_STACK_TOP);  //virtual address of user stack top
+  //save the hartid
+  proc->trapframe->regs.tp = id;
 
-  sprint("hartid = ?: user frame 0x%lx, user stack 0x%lx, user kstack 0x%lx \n", proc->trapframe,
+  sprint("hartid = %d: user frame 0x%lx, user stack 0x%lx, user kstack 0x%lx \n", id, proc->trapframe,
          proc->trapframe->regs.sp, proc->kstack);
 
   // load_bincode_from_host_elf() is defined in kernel/elf.c
@@ -60,7 +66,7 @@ void load_user_program(process *proc) {
 
   // populate the page table of user application. added @lab2_1
   // map user stack in userspace, user_vm_map is defined in kernel/vmm.c
-  user_vm_map((pagetable_t)proc->pagetable, USER_STACK_TOP - PGSIZE, PGSIZE, user_stack,
+  user_vm_map((pagetable_t)proc->pagetable, (USER_STACK_TOP) - PGSIZE, PGSIZE, user_stack,
          prot_to_type(PROT_WRITE | PROT_READ, 1));
 
   // map trapframe in user space (direct mapping as in kernel space).
@@ -73,37 +79,49 @@ void load_user_program(process *proc) {
          prot_to_type(PROT_READ | PROT_EXEC, 0));
 }
 
+void first_init_page(int id){
+  if(id == 0){
+
+    // init phisical memory manager
+    pmm_init();
+
+    // build the kernel page table
+    kern_vm_init();
+  }
+}
+
 //
 // s_start: S-mode entry point of riscv-pke OS kernel.
 //
 int s_start(void) {
-  sprint("hartid = ?: Enter supervisor mode...\n");
+  int id = read_tp();
+  sprint("hartid = %d: Enter supervisor mode...\n", id);
+
   // in the beginning, we use Bare mode (direct) memory mapping as in lab1.
   // but now, we are going to switch to the paging mode @lab2_1.
   // note, the code still works in Bare mode when calling pmm_init() and kern_vm_init().
-  write_csr(satp, 0);
+    write_csr(satp, 0);
 
-  // init phisical memory manager
-  pmm_init();
+  first_init_page(id);
 
-  // build the kernel page table
-  kern_vm_init();
+  //wait for all the kernel
+  sync_barrier(&counter_k, 2);
 
-  // now, switch to paging mode by turning on paging (SV39)
+   // now, switch to paging mode by turning on paging (SV39)
   enable_paging();
   // the code now formally works in paging mode, meaning the page table is now in use.
-  sprint("kernel page table is on \n");
+  //sprint("kernel page table is on \n");
 
   // the application code (elf) is first loaded into memory, and then put into execution
-  load_user_program(&user_app);
+  load_user_program(&user_app[id]);
 
-  sprint("hartid = ?: Switch to user mode...\n");
+  sprint("hartid = %d: Switch to user mode...\n", id);
   
-  uint64 hartid = 0;
+  uint64 hartid = read_tp();
   
   vm_alloc_stage[hartid] = 1;
   // switch_to() is defined in kernel/process.c
-  switch_to(&user_app);
+  switch_to(&user_app[id]);
 
   // we should never reach here.
   return 0;

@@ -105,6 +105,7 @@ extern char _etext[];
 
 // pointer to kernel page director
 pagetable_t g_kernel_pagetable;
+pagetable_t g_kernel_pagetables[2];
 
 //
 // maps virtual address [va, va+sz] to [pa, pa+sz] (for kernel).
@@ -118,6 +119,7 @@ void kern_vm_map(pagetable_t page_dir, uint64 va, uint64 pa, uint64 sz, int perm
 // kern_vm_init() constructs the kernel page table.
 //
 void kern_vm_init(void) {
+  int id = read_tp();
   // pagetable_t is defined in kernel/riscv.h. it's actually uint64*
   pagetable_t t_page_dir;
 

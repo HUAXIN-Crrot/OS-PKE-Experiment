@@ -6,6 +6,7 @@
 #include "kernel/riscv.h"
 #include "kernel/config.h"
 #include "spike_interface/spike_utils.h"
+#include "kernel/sync_utils.h"
 
 //
 // global variables are placed in the .data section.
@@ -28,7 +29,10 @@ extern uint64 htif;
 extern uint64 g_mem_size;
 // struct riscv_regs is define in kernel/riscv.h, and g_itrframe is used to save
 // registers when interrupt hapens in M mode. added @lab1_2
-riscv_regs g_itrframe;
+riscv_regs g_itrframes[2];
+
+//counter for run at the same time
+int counter = 0;
 
 //
 // get the information of HTIF (calling interface) and the emulated memory by
@@ -88,21 +92,41 @@ void timerinit(uintptr_t hartid) {
 }
 
 //
+// first init HITF
+//
+void first_init(uintptr_t hartid, uintptr_t dtb){
+  //only init once
+  if(hartid == 0){
+    // init the spike file interface (stdin,stdout,stderr)
+    // functions with "spike_" prefix are all defined in codes under spike_interface/,
+    // sprint is also defined in spike_interface/spike_utils.c
+    spike_file_init();
+
+    // init HTIF (Host-Target InterFace) and memory by using the Device Table Blob (DTB)
+    // init_dtb() is defined above.
+    init_dtb(dtb);
+  }
+}
+
+//
 // m_start: machine mode C entry point.
 //
 void m_start(uintptr_t hartid, uintptr_t dtb) {
-  // init the spike file interface (stdin,stdout,stderr)
-  // functions with "spike_" prefix are all defined in codes under spike_interface/,
-  // sprint is also defined in spike_interface/spike_utils.c
-  spike_file_init();
+  first_init(hartid, dtb);
+
+  //wait for all the kernel
+  sync_barrier(&counter, 2);
+
+  //save the hartid
+  write_tp(hartid);
+
   sprint("In m_start, hartid:%d\n", hartid);
 
-  // init HTIF (Host-Target InterFace) and memory by using the Device Table Blob (DTB)
-  // init_dtb() is defined above.
-  init_dtb(dtb);
+  
+  
 
   // save the address of trap frame for interrupt in M mode to "mscratch". added @lab1_2
-  write_csr(mscratch, &g_itrframe);
+  write_csr(mscratch, &g_itrframes[hartid]);
 
   // set previous privilege mode to S (Supervisor), and will enter S mode after 'mret'
   // write_csr is a macro defined in kernel/riscv.h
