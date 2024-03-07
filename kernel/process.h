@@ -26,5 +26,7 @@ typedef struct process_t {
 void switch_to(process*);
 
 extern process* current;
+extern process user_app[2];
+
 
 #endif

@@ -12,24 +12,39 @@
 #include "util/functions.h"
 
 #include "spike_interface/spike_utils.h"
+#include "riscv.h"
+#include "sync_utils.h"
+
+//couter for barrier
+int counter_s = 0;
 
 //
 // implement the SYS_user_print syscall
 //
 ssize_t sys_user_print(const char* buf, size_t n) {
-  sprint("hartid = ?: %s\n", buf);
+
+  sprint("hartid = %d: %s", read_tp(), buf);
   return 0;
 }
 
-//
-// implement the SYS_user_exit syscall
-//
+void shut_down(int id, uint64 code){
+  sync_barrier(&counter_s, 2);
+  sprint("hartid = %d: shutdown with code:%d.\n", id, code);
+  shutdown(code);
+}
+
+
+
 ssize_t sys_user_exit(uint64 code) {
-  sprint("hartid = ?: User exit with code:%d.\n", code);
+  int id = read_tp();
+  sprint("hartid = %d: User exit with code:%d.\n", id, code);
   // in lab1, PKE considers only one app (one process). 
   // therefore, shutdown the system when the app calls exit()
-  sprint("hartid = ?: shutdown with code:%d.\n", code);
-  shutdown(code);
+  if(id == 0){
+    shut_down(id, code);
+  }
+  sync_barrier(&counter_s, 2);
+  return 0; 
 }
 
 //

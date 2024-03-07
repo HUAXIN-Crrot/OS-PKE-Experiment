@@ -20,12 +20,16 @@ extern char smode_trap_vector[];
 extern void return_to_user(trapframe*);
 
 // current points to the currently running user-mode application.
-process* current = NULL;
+process* current;
+process user_app[2];
+
 
 //
 // switch to a user-mode process
 //
 void switch_to(process* proc) {
+  int id = read_tp();
+  //sprint("This is switch_to:%d %x\n",id, proc);
   assert(proc);
   current = proc;
 
