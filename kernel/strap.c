@@ -10,6 +10,7 @@
 #include "vmm.h"
 #include "sched.h"
 #include "util/functions.h"
+#include "string.h"
 
 #include "spike_interface/spike_utils.h"
 
@@ -53,17 +54,33 @@ void handle_mtimer_trap() {
 //
 void handle_user_page_fault(uint64 mcause, uint64 sepc, uint64 stval) {
   sprint("handle_page_fault: %lx\n", stval);
+  pte_t *pte;
   switch (mcause) {
     case CAUSE_STORE_PAGE_FAULT:
       // TODO (lab2_3): implement the operations that solve the page fault to
       // dynamically increase application stack.
       // hint: first allocate a new physical page, and then, maps the new page to the
       // virtual address that causes the page fault.
-       if(stval < current->trapframe->regs.sp - PGSIZE) panic("this address is not available!");
+
+      //find the pte
+      pte = page_walk(current->pagetable, stval, 0);
+
+      //copy on write
+      if(((*pte) & 0x100)){
+        void* child_pa = alloc_page();
+        //sprint("This is stval:%lx, This is child_pa:%lx\n", stval, (uint64)child_pa);
+        memcpy(child_pa, (void*)lookup_pa(current->parent->pagetable, stval), PGSIZE);
+        //unmap the origin
+        user_vm_unmap(current->pagetable, stval, PGSIZE, 0);
+        
+        //new mapping
+        user_vm_map((pagetable_t)current->pagetable, stval, PGSIZE, (uint64)child_pa,
+                    prot_to_type(PROT_READ | PROT_WRITE, 1));
+      }else{
+        if(stval < current->trapframe->regs.sp - PGSIZE) panic("this address is not available!");
        map_pages(
         current->pagetable,ROUNDDOWN(stval,PGSIZE),PGSIZE,(uint64)alloc_page(),prot_to_type(PROT_READ|PROT_WRITE,1));
-
-
+      }
       break;
     default:
       sprint("unknown page fault.\n");
