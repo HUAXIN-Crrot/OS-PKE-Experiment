@@ -107,6 +107,14 @@ int free_process( process* proc );
 // fork a child from parent
 int do_fork(process* parent);
 
+//function for wait
+int do_wait(int pid);
+
+void check_parent(int parent_pid, int child_pid);
+void clear_process(process *p);
+
+
+
 // current running process
 extern process* current;
 
