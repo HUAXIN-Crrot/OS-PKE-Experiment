@@ -6,6 +6,20 @@
 
 #define MAX_CMDLINE_ARGS 64
 
+
+// compilation units header (in debug line section)
+typedef struct __attribute__((packed)) {
+    uint32 length;
+    uint16 version;
+    uint32 header_length;
+    uint8 min_instruction_length;
+    uint8 default_is_stmt;
+    int8 line_base;
+    uint8 line_range;
+    uint8 opcode_base;
+    uint8 std_opcode_lengths[12];
+} debug_header;
+
 // elf header structure
 typedef struct elf_header_t {
   uint32 magic;
@@ -42,6 +56,29 @@ typedef struct elf_prog_header_t {
   uint64 align;  /* Segment alignment */
 } elf_prog_header;
 
+// Section header
+typedef struct elf_sect_header_t {
+  uint32 sh_name;		/* Section name */
+  uint32 sh_type;		/* Type of the section */
+  uint64 sh_flags;		/* Miscellaneous section attributes */
+  uint64 sh_addr;		/* Section virtual addr at execution */
+  uint64 sh_offset;		/* Section file offset */
+  uint64 sh_size;		/* Size of section in bytes */
+  uint32 sh_link;		/* Index of another section */
+  uint32 sh_info;		/* Additional section information */
+  uint64 sh_addralign;	/* Section alignment */
+  uint64 sh_entsize;	/* Entry size if section holds table */
+} elf_sect_header;
+
+typedef struct elf_sym {
+  uint32 st_name;		/* Symbol name, the index in strtab */
+  unsigned char	st_info;	/* Type and binding attributes */
+  unsigned char	st_other;	
+  uint16 st_shndx;		/* The section index */
+  uint64 st_value;		/* The virtual address */
+  uint64 st_size;		/* The size of the symbol */
+} elf_symbol;
+
 #define ELF_MAGIC 0x464C457FU  // "\x7FELF" in little endian
 #define ELF_PROG_LOAD 1
 
@@ -66,5 +103,12 @@ elf_status elf_load(elf_ctx *ctx);
 void load_bincode_from_host_elf(process *p);
 
 int sys_exec(const char * addr, const char * para);
+
+//lab1_challenge_1
+int elf_print_backtrace(uint64 depth, uint64 trace_ra);
+
+void get_func_name(elf_ctx *ctx);
+
+static uint64 elf_fpread_vfs(elf_ctx *ctx, void *dest, uint64 nb, uint64 offset);
 
 #endif

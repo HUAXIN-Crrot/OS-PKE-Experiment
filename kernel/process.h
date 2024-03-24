@@ -4,6 +4,18 @@
 #include "riscv.h"
 #include "proc_file.h"
 
+//add for print bug
+// address-line number-file name table
+typedef struct {
+    uint64 addr, line, file;
+} addr_line;
+
+// code file struct, including directory index and file name char pointer
+typedef struct {
+    uint64 dir; char *file;
+} code_file;
+
+
 typedef struct trapframe_t {
   // space to store context (all common registers)
   /* offset:0   */ riscv_regs regs;
@@ -93,6 +105,9 @@ typedef struct process_t {
 
   // file system. added @lab4_1
   proc_file_management *pfiles;
+
+   // added @lab1_challenge2
+  char *debugline; char **dir; code_file *file; addr_line *line; int line_ind;
 }process;
 
 // switch to run user app
@@ -117,5 +132,7 @@ void clear_process(process *p);
 
 // current running process
 extern process* current;
+
+
 
 #endif

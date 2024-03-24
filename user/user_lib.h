@@ -37,4 +37,7 @@ int unlink_u(const char *fn);
 int exec(const char *command, const char *para);
 
 int wait(int pid);
+
+//lab1-challenge1
+int print_backtrace(int depth);
 #endif
