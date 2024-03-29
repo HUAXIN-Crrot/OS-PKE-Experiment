@@ -36,6 +36,22 @@
 #define SYS_user_wait   (SYS_user_base + 31)
 #define SYS_print_backtrace (SYS_user_base + 32)
 
+//add for lab2_challenge_2
+#define SYS_better_malloc (SYS_user_base + 33)
+#define SYS_better_free (SYS_user_base + 34)
+
+//add for lab3_challenge_2
+#define SYS_user_sem_new (SYS_user_base + 35)
+#define  SYS_user_sem_P (SYS_user_base + 36)
+#define  SYS_user_sem_V (SYS_user_base + 37)
+
+//add for lab3_challenge_3
+#define  SYS_user_printpa (SYS_user_base + 38)
+
+//add for lab4_challenge_1
+#define SYS_user_rcwd (SYS_user_base + 39)
+#define SYS_user_ccwd (SYS_user_base + 40)
+
 long do_syscall(long a0, long a1, long a2, long a3, long a4, long a5, long a6, long a7);
 
 #endif

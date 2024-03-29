@@ -65,10 +65,11 @@ void reclaim_proc_file_management(proc_file_management *pfiles) {
 //
 struct file *get_opened_file(int fd) {
   struct file *pfile = NULL;
+  int id = read_tp();
 
   // browse opened file list to locate the fd
   for (int i = 0; i < MAX_FILES; ++i) {
-    pfile = &(current->pfiles->opened_files[i]);  // file entry
+    pfile = &(user_app[id]->pfiles->opened_files[i]);  // file entry
     if (i == fd) break;
   }
   if (pfile == NULL) panic("do_read: invalid fd!\n");
@@ -80,23 +81,43 @@ struct file *get_opened_file(int fd) {
 // return: -1 on failure; non-zero file-descriptor on success.
 //
 int do_open(char *pathname, int flags) {
+ //sprint("This is the origin pathname:%s\n",pathname);
+  //change relative road path
+  int id = read_tp();
+  if(pathname[0] == '.' && pathname[1] == '/'){
+    char new_path [100];
+    char tmp[100];
+    int pos = 0;
+    int len = 0; //the length of cwd->name
+    strcpy(new_path,user_app[id]->pfiles->cwd->name);
+    len = strlen(new_path);
+    new_path[len] = '/';
+    new_path[len+1] = '\0';
+    for(int i = 2;i <= strlen(pathname);i++){
+      tmp[pos++] = pathname[i];
+    }
+    strcat(new_path,tmp);
+    pathname = new_path;
+    //sprint("This is after_pathname:%s\n",pathname);
+  }
   struct file *opened_file = NULL;
   if ((opened_file = vfs_open(pathname, flags)) == NULL) return -1;
 
   int fd = 0;
-  if (current->pfiles->nfiles >= MAX_FILES) {
+  if (user_app[id]->pfiles->nfiles >= MAX_FILES) {
     panic("do_open: no file entry for current process!\n");
   }
   struct file *pfile;
   for (fd = 0; fd < MAX_FILES; ++fd) {
-    pfile = &(current->pfiles->opened_files[fd]);
+    pfile = &(user_app[id]->pfiles->opened_files[fd]);
     if (pfile->status == FD_NONE) break;
   }
 
   // initialize this file structure
   memcpy(pfile, opened_file, sizeof(struct file));
 
-  ++current->pfiles->nfiles;
+  
+  ++user_app[id]->pfiles->nfiles;
   return fd;
 }
 
@@ -166,13 +187,14 @@ int do_close(int fd) {
 // return: the fd of the directory file
 //
 int do_opendir(char *pathname) {
+  int id = read_tp();
   struct file *opened_file = NULL;
   if ((opened_file = vfs_opendir(pathname)) == NULL) return -1;
 
   int fd = 0;
   struct file *pfile;
   for (fd = 0; fd < MAX_FILES; ++fd) {
-    pfile = &(current->pfiles->opened_files[fd]);
+    pfile = &(user_app[id]->pfiles->opened_files[fd]);
     if (pfile->status == FD_NONE) break;
   }
   if (pfile->status != FD_NONE)  // no free entry
@@ -181,7 +203,7 @@ int do_opendir(char *pathname) {
   // initialize this file structure
   memcpy(pfile, opened_file, sizeof(struct file));
 
-  ++current->pfiles->nfiles;
+  ++user_app[id]->pfiles->nfiles;
   return fd;
 }
 

@@ -21,7 +21,7 @@ ifneq (,)
   mabi := -mabi=$(if $(is_32bit),ilp32,lp64)
 endif
 
-CFLAGS        := -Wall -Werror  -fno-builtin -nostdlib -D__NO_INLINE__ -mcmodel=medany -g -Og -std=gnu99 -Wno-unused -Wno-attributes -fno-delete-null-pointer-checks -fno-PIE $(march)
+CFLAGS        := -Wall -Werror -gdwarf-3 -fno-builtin -nostdlib -D__NO_INLINE__ -mcmodel=medany -g -Og -std=gnu99 -Wno-unused -Wno-attributes -fno-delete-null-pointer-checks -fno-PIE $(march)
 COMPILE       	:= $(CC) -MMD -MP $(CFLAGS) $(SPROJS_INCLUDE)
 
 #---------------------	utils -----------------------
@@ -112,6 +112,47 @@ USER_R_OBJS  			:= $(addprefix $(OBJ_DIR)/, $(patsubst %.c,%.o,$(USER_R_CPPS)))
 
 USER_R_TARGET 	:= $(HOSTFS_ROOT)/bin/app_errorline
 
+USER_S_CPPS  			:= user/app_sum_sequence.c user/user_lib.c
+
+USER_S_OBJS  			:= $(addprefix $(OBJ_DIR)/, $(patsubst %.c,%.o,$(USER_S_CPPS)))
+
+USER_S_TARGET 	:= $(HOSTFS_ROOT)/bin/app_sum_sequence
+
+USER_H_CPPS  			:= user/app_singlepageheap.c user/user_lib.c
+
+USER_H_OBJS  			:= $(addprefix $(OBJ_DIR)/, $(patsubst %.c,%.o,$(USER_H_CPPS)))
+
+USER_H_TARGET 	:= $(HOSTFS_ROOT)/bin/app_singlepageheap
+
+USER_SEM_CPPS  			:= user/app_semaphore.c user/user_lib.c
+
+USER_SEM_OBJS  			:= $(addprefix $(OBJ_DIR)/, $(patsubst %.c,%.o,$(USER_SEM_CPPS)))
+
+USER_SEM_TARGET 	:= $(HOSTFS_ROOT)/bin/app_semaphore
+
+USER_COW_CPPS  			:= user/app_cow.c user/user_lib.c
+
+USER_COW_OBJS  			:= $(addprefix $(OBJ_DIR)/, $(patsubst %.c,%.o,$(USER_COW_CPPS)))
+
+USER_COW_TARGET 	:= $(HOSTFS_ROOT)/bin/app_cow
+
+USER_RE_CPPS  			:= user/app_relativepath.c user/user_lib.c
+
+USER_RE_OBJS  			:= $(addprefix $(OBJ_DIR)/, $(patsubst %.c,%.o,$(USER_RE_CPPS)))
+
+USER_RE_TARGET 	:= $(HOSTFS_ROOT)/bin/app_relativepath
+
+USER_LDS0  := user/user0.lds
+USER_LDS1  := user/user1.lds
+
+USER_CPP0 		:= user/app0.c user/user_lib.c
+USER_CPP1 		:= user/app1.c user/user_lib.c
+
+USER_OBJ0  		:= $(addprefix $(OBJ_DIR)/, $(patsubst %.c,%.o,$(USER_CPP0)))
+USER_OBJ1  		:= $(addprefix $(OBJ_DIR)/, $(patsubst %.c,%.o,$(USER_CPP1)))
+
+USER_TARGET0 	:= $(HOSTFS_ROOT)/bin/app0
+USER_TARGET1 	:= $(HOSTFS_ROOT)/bin/app1
 
 #------------------------targets------------------------
 $(OBJ_DIR):
@@ -200,21 +241,62 @@ $(USER_R_TARGET): $(OBJ_DIR) $(UTIL_LIB) $(USER_R_OBJS)
 	@$(COMPILE) --entry=main $(USER_R_OBJS) $(UTIL_LIB) -o $@
 	@echo "User app has been built into" \"$@\"
 
+$(USER_S_TARGET): $(OBJ_DIR) $(UTIL_LIB) $(USER_S_OBJS)
+	@echo "linking" $@	...	
+	-@mkdir -p $(HOSTFS_ROOT)/bin
+	@$(COMPILE) --entry=main $(USER_S_OBJS) $(UTIL_LIB) -o $@
+	@echo "User app has been built into" \"$@\"
+
+$(USER_H_TARGET): $(OBJ_DIR) $(UTIL_LIB) $(USER_H_OBJS)
+	@echo "linking" $@	...	
+	-@mkdir -p $(HOSTFS_ROOT)/bin
+	@$(COMPILE) --entry=main $(USER_H_OBJS) $(UTIL_LIB) -o $@
+	@echo "User app has been built into" \"$@\"
+
+$(USER_SEM_TARGET): $(OBJ_DIR) $(UTIL_LIB) $(USER_SEM_OBJS)
+	@echo "linking" $@	...	
+	-@mkdir -p $(HOSTFS_ROOT)/bin
+	@$(COMPILE) --entry=main $(USER_SEM_OBJS) $(UTIL_LIB) -o $@
+	@echo "User app has been built into" \"$@\"
+
+$(USER_COW_TARGET): $(OBJ_DIR) $(UTIL_LIB) $(USER_COW_OBJS)
+	@echo "linking" $@	...	
+	-@mkdir -p $(HOSTFS_ROOT)/bin
+	@$(COMPILE) --entry=main $(USER_COW_OBJS) $(UTIL_LIB) -o $@
+	@echo "User app has been built into" \"$@\"
+
+$(USER_RE_TARGET): $(OBJ_DIR) $(UTIL_LIB) $(USER_RE_OBJS)
+	@echo "linking" $@	...	
+	-@mkdir -p $(HOSTFS_ROOT)/bin
+	@$(COMPILE) --entry=main $(USER_RE_OBJS) $(UTIL_LIB) -o $@
+	@echo "User app has been built into" \"$@\"
+
+$(USER_TARGET0): $(OBJ_DIR) $(UTIL_LIB) $(USER_OBJ0) $(USER_LDS0)
+	@echo "linking" $@	...	
+	@$(COMPILE) $(USER_OBJ0) $(UTIL_LIB) -o $@ -T $(USER_LDS0)
+	@echo "User app has been built into" \"$@\"
+	
+$(USER_TARGET1): $(OBJ_DIR) $(UTIL_LIB) $(USER_OBJ1) $(USER_LDS1)
+	@echo "linking" $@	...	
+	@$(COMPILE) $(USER_OBJ1) $(UTIL_LIB) -o $@ -T $(USER_LDS1)
+	@echo "User app has been built into" \"$@\"
+
 -include $(wildcard $(OBJ_DIR)/*/*.d)
 -include $(wildcard $(OBJ_DIR)/*/*/*.d)
 
 .DEFAULT_GOAL := $(all)
 
-all: $(KERNEL_TARGET) $(USER_TARGET) $(USER_E_TARGET) $(USER_M_TARGET) $(USER_T_TARGET) $(USER_C_TARGET) $(USER_O_TARGET) $(USER_P_TARGET) $(USER_R_TARGET)
+all: $(KERNEL_TARGET) $(USER_TARGET) $(USER_E_TARGET) $(USER_M_TARGET) $(USER_T_TARGET) $(USER_C_TARGET) $(USER_O_TARGET) $(USER_P_TARGET) $(USER_R_TARGET) $(USER_S_TARGET) $(USER_H_TARGET) $(USER_SEM_TARGET) $(USER_COW_TARGET) $(USER_RE_TARGET) $(USER_TARGET0) $(USER_TARGET1)
 .PHONY:all
 
-run: $(KERNEL_TARGET) $(USER_TARGET) $(USER_E_TARGET) $(USER_M_TARGET) $(USER_T_TARGET) $(USER_C_TARGET) $(USER_O_TARGET) $(USER_P_TARGET) $(USER_R_TARGET)
+run: $(KERNEL_TARGET) $(USER_TARGET) $(USER_E_TARGET) $(USER_M_TARGET) $(USER_T_TARGET) $(USER_C_TARGET) $(USER_O_TARGET) $(USER_P_TARGET) $(USER_R_TARGET) $(USER_S_TARGET) $(USER_H_TARGET) $(USER_SEM_TARGET) $(USER_COW_TARGET) $(USER_RE_TARGET) $(USER_TARGET0) $(USER_TARGET1)
 	@echo "********************HUST PKE********************"
 	spike $(KERNEL_TARGET) /bin/app_shell
+	spike -p2 $(KERNEL_TARGET) $(USER_TARGET0) $(USER_TARGET1)
 
 # need openocd!
-gdb:$(KERNEL_TARGET) $(USER_TARGET)
-	spike --rbb-port=9824 -H $(KERNEL_TARGET) $(USER_TARGET) &
+gdb:$(KERNEL_TARGET) $(USER_TARGET) $(USER_TARGET0) $(USER_TARGET1)
+	spike --rbb-port=9824 -H $(KERNEL_TARGET) $(USER_TARGET) $(USER_TARGET0) $(USER_TARGET1) &
 	@sleep 1
 	openocd -f ./.spike.cfg &
 	@sleep 1

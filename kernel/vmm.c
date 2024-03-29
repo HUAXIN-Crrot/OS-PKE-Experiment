@@ -10,6 +10,7 @@
 #include "util/string.h"
 #include "spike_interface/spike_utils.h"
 #include "util/functions.h"
+#include "process.h"
 
 /* --- utility functions for virtual address mapping --- */
 //
@@ -19,14 +20,17 @@
 int map_pages(pagetable_t page_dir, uint64 va, uint64 size, uint64 pa, int perm) {
   uint64 first, last;
   pte_t *pte;
-
+  //sprint("THis is map_pages\n");
   for (first = ROUNDDOWN(va, PGSIZE), last = ROUNDDOWN(va + size - 1, PGSIZE);
       first <= last; first += PGSIZE, pa += PGSIZE) {
+    //sprint("first: %x last: %x pgsize: %x\n", first, last, PGSIZE);
     if ((pte = page_walk(page_dir, first, 1)) == 0) return -1;
     if (*pte & PTE_V)
       panic("map_pages fails on mapping va (0x%lx) to pa (0x%lx)", first, pa);
     *pte = PA2PTE(pa) | perm | PTE_V;
+    //sprint("HHHHH\n");
   }
+  
   return 0;
 }
 
@@ -49,7 +53,7 @@ uint64 prot_to_type(int prot, int user) {
 //
 pte_t *page_walk(pagetable_t page_dir, uint64 va, int alloc) {
   if (va >= MAXVA) panic("page_walk");
-
+  //sprint("This is page_walk\n");
   // starting from the page directory
   pagetable_t pt = page_dir;
 
@@ -59,6 +63,7 @@ pte_t *page_walk(pagetable_t page_dir, uint64 va, int alloc) {
   for (int level = 2; level > 0; level--) {
     // macro "PX" gets the PTE index in page table of current level
     // "pte" points to the entry of current level
+    
     pte_t *pte = pt + PX(level, va);
 
     // now, we need to know if above pte is valid (established mapping to a phyiscal page)
@@ -111,6 +116,7 @@ pagetable_t g_kernel_pagetable;
 //
 void kern_vm_map(pagetable_t page_dir, uint64 va, uint64 pa, uint64 sz, int perm) {
   // map_pages is defined in kernel/vmm.c
+  //sprint("THis is kern_vm_map\n");
   if (map_pages(page_dir, va, sz, pa, perm) != 0) panic("kern_vm_map");
 }
 
@@ -118,6 +124,10 @@ void kern_vm_map(pagetable_t page_dir, uint64 va, uint64 pa, uint64 sz, int perm
 // kern_vm_init() constructs the kernel page table.
 //
 void kern_vm_init(void) {
+  
+  int id = read_tp();
+
+  //sprint("id: %d: This is kern_vm_init\n", id);
   // pagetable_t is defined in kernel/riscv.h. it's actually uint64*
   pagetable_t t_page_dir;
 
@@ -126,10 +136,12 @@ void kern_vm_init(void) {
   // memset is defined in util/string.c
   memset(t_page_dir, 0, PGSIZE);
 
+
   // map virtual address [KERN_BASE, _etext] to physical address [DRAM_BASE, DRAM_BASE+(_etext - KERN_BASE)],
   // to maintain (direct) text section kernel address mapping.
   kern_vm_map(t_page_dir, KERN_BASE, DRAM_BASE, (uint64)_etext - KERN_BASE,
          prot_to_type(PROT_READ | PROT_EXEC, 0));
+  
 
   sprint("KERN_BASE 0x%lx\n", lookup_pa(t_page_dir, KERN_BASE));
 
@@ -187,6 +199,7 @@ void user_vm_unmap(pagetable_t page_dir, uint64 va, uint64 size, int free) {
   // as naive_free reclaims only one page at a time, you only need to consider one page
   // to make user/app_naive_malloc to behave correctly.
   pte_t* PTE = page_walk(page_dir,va,0);
+  
   if(free != 0){
     free_page((void*)((*PTE >> 10)<<12));
   }
@@ -210,4 +223,83 @@ void print_proc_vmspace(process* proc) {
     }
     sprint( ", mapped to pa:%lx\n", lookup_pa(proc->pagetable, proc->mapped_info[i].va) );
   }
+}
+
+//init the first block
+uint64 first_blcok = 1;
+struct MCB * mcb_head = NULL;
+uint64 cur_malloc = USER_FREE_ADDRESS_START; // the origin malloc addr
+
+//turn va to pa
+void va_malloc(uint64 n){
+  uint64 tmp = ROUNDUP(cur_malloc, PGSIZE);
+  int id = read_tp();
+  //sprint("This is tmpaddr:0x%x  %x %x %x\n",tmp,cur_malloc,n,PGSIZE);
+  char * mem;
+  for(uint64 i = tmp;i < (cur_malloc + n);i += PGSIZE){
+    //sprint("i: %x  %x\n",i, cur_malloc + n);
+    mem = (char *)alloc_page();
+    memset(mem,0,(size_t)PGSIZE);
+    map_pages(user_app[id]->pagetable,tmp,PGSIZE,(uint64)mem,prot_to_type(PROT_READ | PROT_WRITE,1));
+  }
+  cur_malloc += n;
+  return ;
+}
+
+void init_MCB(){
+  int id = read_tp();
+  if(first_blcok){
+    first_blcok = 0;
+    //sprint("Start the first mapping!\n");
+    va_malloc(sizeof(mcb));
+    //sprint("The first mapping is success!\n");
+    pte_t *pte = page_walk(user_app[id]->pagetable,USER_FREE_ADDRESS_START,0);
+    mcb_head = (mcb*)PTE2PA(*pte);
+    mcb_head->flag = 0;
+    mcb_head->addr = *pte + sizeof(mcb);
+    mcb_head->size = 0;
+    mcb_head->next = NULL;
+    return ;
+  }
+  return ;
+}
+
+uint64 sys_better_malloc(uint64 n){
+  int id = read_tp();
+  init_MCB();
+  mcb *cur = (mcb*)mcb_head;
+  while(1){
+    if(cur->size >= n && cur->flag == 0){
+      cur->flag = 1;
+      return cur->addr;
+    }
+    if(cur->next == NULL) break;
+    cur = cur->next;
+  }
+  uint64 top = cur_malloc;
+  va_malloc(sizeof(mcb) + n);
+  pte_t *pte = page_walk(user_app[id]->pagetable,top,0);
+  mcb * new_b = (mcb*)(PTE2PA(*pte) + (top & 0xfff));
+  //make addr align
+  uint64 align = (uint64)new_b % 8;
+  new_b = (mcb*)((uint64)new_b + 8 - align);
+
+  new_b->flag = 1;
+  new_b->size = n;
+  new_b->addr = top + sizeof(mcb);
+  new_b->next = cur->next;
+  cur->next = new_b;
+
+  return new_b->addr;
+}
+
+void sys_better_free(uint64 va){
+  int id = read_tp();
+  void *free_addr = (void*)((uint64)va - sizeof(mcb));
+  pte_t *pte = page_walk(user_app[id]->pagetable,(uint64)(free_addr), 0);
+  mcb *free_b = (mcb*)(PTE2PA(*pte) + ((uint64)free_addr & 0xfff));
+  uint64 align = (uint64)free_b % 8;
+  free_b = (mcb*)((uint64)free_b + 8 - align);
+  free_b->flag = 0;
+  return ;
 }

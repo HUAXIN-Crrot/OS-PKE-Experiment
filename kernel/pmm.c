@@ -5,6 +5,11 @@
 #include "util/string.h"
 #include "memlayout.h"
 #include "spike_interface/spike_utils.h"
+#include "sync_utils.h"
+
+//lock for free and alloct
+static int lock_alloc = 0;
+static int lock_free = 0;
 
 // _end is defined in kernel/kernel.lds, it marks the ending (virtual) address of PKE kernel
 extern char _end[];
@@ -36,6 +41,7 @@ static void create_freepage_list(uint64 start, uint64 end) {
 // place a physical page at *pa to the free list of g_free_mem_list (to reclaim the page)
 //
 void free_page(void *pa) {
+  use_lock(&lock_free);
   if (((uint64)pa % PGSIZE) != 0 || (uint64)pa < free_mem_start_addr || (uint64)pa >= free_mem_end_addr)
     panic("free_page 0x%lx \n", pa);
 
@@ -43,6 +49,7 @@ void free_page(void *pa) {
   list_node *n = (list_node *)pa;
   n->next = g_free_mem_list.next;
   g_free_mem_list.next = n;
+  free_lock(&lock_free);
 }
 
 //
@@ -50,9 +57,11 @@ void free_page(void *pa) {
 // Allocates only ONE page!
 //
 void *alloc_page(void) {
+  use_lock(&lock_alloc);
   list_node *n = g_free_mem_list.next;
   if (n) g_free_mem_list.next = n->next;
 
+  free_lock(&lock_alloc);
   return (void *)n;
 }
 

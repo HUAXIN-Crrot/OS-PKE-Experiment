@@ -6,5 +6,10 @@
 /bin/app_ls /RAMDISK0/sub_dir
 /bin/app_ls /RAMDISK0
 /bin/app_print_backtrace /app_print_backtrace
-/bin/app_errorline /app_errorline
+/bin/app_singlepageheap /app_singlepageheap
+/bin/app_semaphore /app_semaphore
+/bin/app_cow /app_cow
+/bin/app_relativepath /app_relativepath
+
+
 END END

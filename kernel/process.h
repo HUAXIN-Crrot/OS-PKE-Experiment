@@ -4,6 +4,10 @@
 #include "riscv.h"
 #include "proc_file.h"
 
+//macimun number of sem queue
+#define MAX_SEM 32
+
+
 //add for print bug
 // address-line number-file name table
 typedef struct {
@@ -110,6 +114,16 @@ typedef struct process_t {
   char *debugline; char **dir; code_file *file; addr_line *line; int line_ind;
 }process;
 
+// sem to control the process
+
+typedef struct SEM
+{
+  int flag; // be used or not
+  int value;
+  process *p_queue;
+}Sem;
+
+
 // switch to run user app
 void switch_to(process*);
 
@@ -128,10 +142,22 @@ int do_wait(int pid);
 void check_parent(int parent_pid, int child_pid);
 void clear_process(process *p);
 
+//sem control
+int p_sys_sem_new(int n);
+
+int p_sys_sem_P(int n);
+
+int p_sys_sem_V(int n);
+
+//init sem
+void init_Sem_pool();
+
 
 
 // current running process
 extern process* current;
+
+extern process* user_app[2];
 
 
 

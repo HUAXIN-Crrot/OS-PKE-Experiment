@@ -17,6 +17,7 @@
 #include "memlayout.h"
 #include "sched.h"
 #include "spike_interface/spike_utils.h"
+#include "sync_utils.h"
 
 //Two functions defined in kernel/usertrap.S
 extern char smode_trap_vector[];
@@ -29,20 +30,31 @@ extern char trap_sec_start[];
 // process pool. added @lab3_1
 process procs[NPROC];
 
+//sem pool
+Sem Sems[MAX_SEM];
+
 // current points to the currently running user-mode application.
 process* current = NULL;
+
+process* user_app[2];
+
+int lock_alloc_p = 0;
 
 //
 // switch to a user-mode process
 //
 void switch_to(process* proc) {
+  int id = read_tp();
+  //sprint("This is hartid:%d in switch_to\n", id);
   assert(proc);
   current = proc;
-
+  user_app[id] = proc;
+  
   // write the smode_trap_vector (64-bit func. address) defined in kernel/strap_vector.S
   // to the stvec privilege register, such that trap handler pointed by smode_trap_vector
   // will be triggered when an interrupt occurs in S mode.
   write_csr(stvec, (uint64)smode_trap_vector);
+  
 
   // set up trapframe values (in process structure) that smode_trap_vector will need when
   // the process next re-enters the kernel.
@@ -65,6 +77,7 @@ void switch_to(process* proc) {
   // make user page table. macro MAKE_SATP is defined in kernel/riscv.h. added @lab2_1
   uint64 user_satp = MAKE_SATP(proc->pagetable);
 
+  
   // return_to_user() is defined in kernel/strap_vector.S. switch to user mode with sret.
   // note, return_to_user takes two parameters @ and after lab2_1.
   return_to_user(proc->trapframe, user_satp);
@@ -88,10 +101,20 @@ void init_proc_pool() {
 //
 process* alloc_process() {
   // locate the first usable process structure
+  use_lock(&lock_proc);
   int i;
 
+  int id = read_tp();
+
+
   for( i=0; i<NPROC; i++ )
-    if( procs[i].status == FREE ) break;
+  {
+    if( procs[i].status == FREE ){
+      //sprint("hartid: %d find the free procs->pid: %d\n", id, i);
+      break;
+    }
+  }
+    
 
   if( i>=NPROC ){
     panic( "cannot find any free process structure.\n" );
@@ -101,6 +124,10 @@ process* alloc_process() {
   // init proc[i]'s vm space
   procs[i].trapframe = (trapframe *)alloc_page();  //trapframe, used to save context
   memset(procs[i].trapframe, 0, sizeof(trapframe));
+
+  // save tp
+  procs[i].trapframe->regs.tp = id;
+  sprint("This is hartid:%d now has been written to trapframe\n", id);
 
   // page directory
   procs[i].pagetable = (pagetable_t)alloc_page();
@@ -136,7 +163,7 @@ process* alloc_process() {
   procs[i].mapped_info[SYSTEM_SEGMENT].npages = 1;
   procs[i].mapped_info[SYSTEM_SEGMENT].seg_type = SYSTEM_SEGMENT;
 
-  sprint("in alloc_proc. user frame 0x%lx, user stack 0x%lx, user kstack 0x%lx \n",
+  sprint("hartid = %d:in alloc_proc. user frame 0x%lx, user stack 0x%lx, user kstack 0x%lx \n", id,
     procs[i].trapframe, procs[i].trapframe->regs.sp, procs[i].kstack);
 
   // initialize the process's heap manager
@@ -156,7 +183,9 @@ process* alloc_process() {
   sprint("in alloc_proc. build proc_file_management successfully.\n");
 
   // return after initialization.
-  return &procs[i];
+  process* tmp = &procs[i];
+  free_lock(&lock_proc);
+  return tmp;
 }
 
 //
@@ -183,7 +212,7 @@ int do_fork( process* parent)
 {
   sprint( "will fork a child from parent %d.\n", parent->pid );
   process* child = alloc_process();
-
+  int id = read_tp();
   for( int i=0; i<parent->total_mapped_region; i++ ){
     // browse parent's vm space, and copy its trapframe and data segments,
     // map its code segment.
@@ -200,31 +229,40 @@ int do_fork( process* parent)
 
         // convert free_pages_address into a filter to skip reclaimed blocks in the heap
         // when mapping the heap blocks
-        int free_block_filter[MAX_HEAP_PAGES];
-        memset(free_block_filter, 0, MAX_HEAP_PAGES);
-        uint64 heap_bottom = parent->user_heap.heap_bottom;
-        for (int i = 0; i < parent->user_heap.free_pages_count; i++) {
-          int index = (parent->user_heap.free_pages_address[i] - heap_bottom) / PGSIZE;
-          free_block_filter[index] = 1;
+        {
+          int free_block_filter[MAX_HEAP_PAGES];
+          memset(free_block_filter, 0, MAX_HEAP_PAGES);
+          uint64 heap_bottom = parent->user_heap.heap_bottom;
+          for (int i = 0; i < parent->user_heap.free_pages_count; i++) {
+            int index = (parent->user_heap.free_pages_address[i] - heap_bottom) / PGSIZE;
+            free_block_filter[index] = 1;
+          }
+
+          // copy and map the heap blocks
+          for (uint64 heap_block = user_app[id]->user_heap.heap_bottom;
+              heap_block < user_app[id]->user_heap.heap_top; heap_block += PGSIZE) {
+            if (free_block_filter[(heap_block - heap_bottom) / PGSIZE])  // skip free blocks
+              continue;
+            //sprint("This addr:0x%x\n",heap_block);
+
+            //void* child_pa = alloc_page();
+            //memcpy(child_pa, (void*)lookup_pa(parent->pagetable, heap_block), PGSIZE);
+            //only map to parent process
+            uint64 parent_pa = lookup_pa(parent->pagetable, heap_block);
+            user_vm_map((pagetable_t)child->pagetable, heap_block, PGSIZE, parent_pa,
+                        prot_to_type(PROT_READ, 1));
+            //set the symble make pte[8] = 1
+            pte_t *heap_pte = page_walk(child->pagetable, heap_block, 0);
+            *heap_pte = *heap_pte + (uint64)(0x100);
+            
+          }
+
+          child->mapped_info[HEAP_SEGMENT].npages = parent->mapped_info[HEAP_SEGMENT].npages;
+
+          // copy the heap manager from parent to child
+          memcpy((void*)&child->user_heap, (void*)&parent->user_heap, sizeof(parent->user_heap));
+          break;
         }
-
-        // copy and map the heap blocks
-        for (uint64 heap_block = current->user_heap.heap_bottom;
-             heap_block < current->user_heap.heap_top; heap_block += PGSIZE) {
-          if (free_block_filter[(heap_block - heap_bottom) / PGSIZE])  // skip free blocks
-            continue;
-
-          void* child_pa = alloc_page();
-          memcpy(child_pa, (void*)lookup_pa(parent->pagetable, heap_block), PGSIZE);
-          user_vm_map((pagetable_t)child->pagetable, heap_block, PGSIZE, (uint64)child_pa,
-                      prot_to_type(PROT_WRITE | PROT_READ, 1));
-        }
-
-        child->mapped_info[HEAP_SEGMENT].npages = parent->mapped_info[HEAP_SEGMENT].npages;
-
-        // copy the heap manager from parent to child
-        memcpy((void*)&child->user_heap, (void*)&parent->user_heap, sizeof(parent->user_heap));
-        break;
       case CODE_SEGMENT:
         // TODO (lab3_1): implment the mapping of child code segment to parent's
         // code segment.
@@ -281,13 +319,14 @@ int do_fork( process* parent)
 // function for wait
 //
 int do_wait(int pid){
+  int id = read_tp();
   //invaild pid number
   if(pid == 0 || pid < -1 || pid >= NPROC)
     return -1;
   bool find_child = FALSE;
   if(pid == -1){
     for(int i = 0;i < NPROC;i++){
-      if(procs[i].parent == current){
+      if(procs[i].parent == user_app[id]){
         find_child = TRUE;
         if(procs[i].status == ZOMBIE){
           procs[i].status = FREE;
@@ -301,19 +340,19 @@ int do_wait(int pid){
     }else{
       //find the child process but it is still running
       //turn parent process into blocked state
-      current->status = BLOCKED;
+      user_app[id]->status = BLOCKED;
       schedule();
       return -1;
     }
   }else{
     //not this parent process
-    if(procs[pid].parent != current)
+    if(procs[pid].parent != user_app[id])
       return -1;
     if(procs[pid].status == ZOMBIE){
       procs[pid].status = FREE;
       return pid;
     }else{
-      current->status = BLOCKED;
+      user_app[id]->status = BLOCKED;
       schedule();
       return -1;
     }
@@ -387,4 +426,61 @@ void clear_process(process *p)
   p->mapped_info[HEAP_SEGMENT].seg_type = HEAP_SEGMENT;
 
   p->total_mapped_region = 4;
+}
+
+//
+//initialize Sem pool
+//
+void init_Sem_pool(){
+  memset(Sems, 0, sizeof(Sem)*MAX_SEM);
+
+  for(int i = 0;i < MAX_SEM;i++){
+    Sems[i].flag = 0;
+    Sems[i].value = 0;
+    Sems[i].p_queue = NULL;
+  }
+}
+
+//
+// Sem control function
+//
+int p_sys_sem_new(int n){
+  for(int i = 0;i < MAX_SEM;i++){
+    if(Sems[i].flag == 0){
+      Sems[i].value = n;
+      Sems[i].flag = 1;
+      return i;
+    }
+  }
+  return -1;
+}
+
+int p_sys_sem_P(int n){
+  int id = read_tp();
+  Sems[n].value--;
+  if(Sems[n].value < 0){
+    if(Sems[n].p_queue == NULL){
+      Sems[n].p_queue = user_app[id];
+      user_app[id]->queue_next = NULL;
+    }else{
+      process *tmp = Sems[n].p_queue;
+      while(tmp->queue_next){
+        tmp = tmp->queue_next;
+      }
+      tmp->queue_next = user_app[id]->queue_next;
+    }
+    user_app[id]->status = BLOCKED;
+    schedule();
+  }
+  return 0;
+}
+
+int p_sys_sem_V(int n){
+  Sems[n].value++;
+  if(Sems[n].p_queue){
+    process *tmp = Sems[n].p_queue;
+    Sems[n].p_queue = tmp->queue_next;
+    insert_to_ready_queue(tmp);
+  }
+  return 0;
 }

@@ -15,6 +15,7 @@
 #include "vfs.h"
 #include "rfs.h"
 #include "ramdev.h"
+#include "sync_utils.h"
 
 //
 // trap_sec_start points to the beginning of S-mode trap segment (i.e., the entry point of
@@ -22,10 +23,16 @@
 //
 extern char trap_sec_start[];
 
+int counter_k = 0;
+
+int lock_p = 0; //lock for use and load process
+
 //
 // turn on paging. added @lab2_1
 //
 void enable_paging() {
+  //int id = read_tp();
+
   // write the pointer to kernel page (table) directory into the CSR of "satp".
   write_csr(satp, MAKE_SATP(g_kernel_pagetable));
 
@@ -79,37 +86,56 @@ process* load_user_program() {
   return proc;
 }
 
+void first_init_page(int id){
+  if(id == 0){
+    // init phisical memory manager
+    pmm_init();
+
+    // build the kernel page table
+    kern_vm_init();
+
+    // added @lab3_1
+    init_proc_pool();
+
+    // added lab3_challenge_2
+    // init SEM
+    init_Sem_pool();
+
+    // init file system, added @lab4_1
+    fs_init();
+  }
+}
+
 //
 // s_start: S-mode entry point of riscv-pke OS kernel.
 //
 int s_start(void) {
-  sprint("Enter supervisor mode...\n");
+  int id = read_tp();
+  sprint("hartid = %d: Enter supervisor mode...\n",id);
   // in the beginning, we use Bare mode (direct) memory mapping as in lab1.
   // but now, we are going to switch to the paging mode @lab2_1.
   // note, the code still works in Bare mode when calling pmm_init() and kern_vm_init().
   write_csr(satp, 0);
 
-  // init phisical memory manager
-  pmm_init();
+  first_init_page(id);
 
-  // build the kernel page table
-  kern_vm_init();
+
+  //wait for all the kernel
+  sync_barrier(&counter_k, 2);
 
   // now, switch to paging mode by turning on paging (SV39)
   enable_paging();
   // the code now formally works in paging mode, meaning the page table is now in use.
   sprint("kernel page table is on \n");
 
-  // added @lab3_1
-  init_proc_pool();
 
-  // init file system, added @lab4_1
-  fs_init();
-
-  sprint("Switch to user mode...\n");
+  sprint("hartid = %d: Switch to user mode...\n", id);
   // the application code (elf) is first loaded into memory, and then put into execution
   // added @lab3_1
+  use_lock(&lock_p);
   insert_to_ready_queue( load_user_program() );
+  free_lock(&lock_p);
+
   schedule();
 
   // we should never reach here.

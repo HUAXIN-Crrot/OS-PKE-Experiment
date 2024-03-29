@@ -9,24 +9,26 @@ char content[8000];
 struct stat f_stat;
 
 void bug_print(){
+ // sprint("This is bug_print\n");
+  int id = read_tp();
   uint64 bug_addr = read_csr(mepc);
   addr_line * bug_line = NULL;
   char * bug_line_dir = NULL;
   int dir_len = 0;
 
   //find the bug line
-  for(int i = 0;i < current->line_ind;i++){
-    if(bug_addr < current->line[i].addr){
+  for(int i = 0;i < user_app[id]->line_ind;i++){
+    if(bug_addr < user_app[id]->line[i].addr){
       //sprint("bug_addr: %x current: %x\n", bug_addr, current->line[i].addr);
-      bug_line = current->line + i - 1;
+      bug_line = user_app[id]->line + i - 1;
 
        //find the full path of the file
-      bug_line_dir = current->dir[current->file[bug_line->file].dir];
+      bug_line_dir = user_app[id]->dir[user_app[id]->file[bug_line->file].dir];
      // sprint("bug_line_dir:%x", bug_line_dir);
       strcpy(path,bug_line_dir);
       dir_len = strlen(bug_line_dir);
       path[dir_len] = '/';
-      strcpy(path+dir_len+1, current->file[bug_line->file].file);
+      strcpy(path+dir_len+1, user_app[id]->file[bug_line->file].file);
 
       //sprint("addr: %s\n", path);
 

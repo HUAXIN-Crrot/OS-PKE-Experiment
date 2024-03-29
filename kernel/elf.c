@@ -216,7 +216,8 @@ void get_func_name(elf_ctx *ctx){
 
 //this function is for printing symblos
 int elf_print_backtrace(uint64 depth, uint64 trace_ra){
-  ssize_t *ret_addr = (ssize_t *)user_va_to_pa((pagetable_t)(current->pagetable), (void *)trace_ra);
+  int id = read_tp();
+  ssize_t *ret_addr = (ssize_t *)user_va_to_pa((pagetable_t)(user_app[id]->pagetable), (void *)trace_ra);
   int j = 0;
   for(;j < depth;j++){
     int i = 0;
@@ -228,7 +229,7 @@ int elf_print_backtrace(uint64 depth, uint64 trace_ra){
       }
     }
     trace_ra = trace_ra + 16;
-    ret_addr = (ssize_t *)user_va_to_pa((pagetable_t)(current->pagetable), (void *)trace_ra);
+    ret_addr = (ssize_t *)user_va_to_pa((pagetable_t)(user_app[id]->pagetable), (void *)trace_ra);
   }
   return j;
 }
@@ -403,12 +404,13 @@ void get_debug_line(elf_ctx *ctx){
     elf_fpread_vfs(ctx,(void*)&tmp_sh,sizeof(tmp_sh),ctx->ehdr.shoff + i * ctx->ehdr.shentsize);
 
     if(strcmp(tmp_str+tmp_sh.sh_name,".debug_line") == 0){
-      sprint("find the debug_line %s \n",tmp_str + tmp_sh.sh_name );
+      //sprint("find the debug_line %s \n",tmp_str + tmp_sh.sh_name );
       debug_line_sh = tmp_sh;
       break;
     }
 
   }
+  //sprint("size: %d\n", debug_line_sh.sh_size);
   elf_fpread_vfs(ctx,(void*)&buf_debug_line,debug_line_sh.sh_size,debug_line_sh.sh_offset);
   make_addr_line(ctx,buf_debug_line,debug_line_sh.sh_size);
 }
@@ -417,14 +419,16 @@ void get_debug_line(elf_ctx *ctx){
 // load the elf of user application, by using the spike file interface.
 //
 void load_bincode_from_host_elf(process *p) {
-  //sprint("process_pid: %d\n", p->pid);
+  //sprint("THis is load bin_code\n");
   arg_buf arg_bug_msg;
+  int id = read_tp();
 
   // retrieve command line arguements
   size_t argc = parse_args(&arg_bug_msg);
   if (!argc) panic("You need to specify the application program!\n");
 
-  sprint("Application: %s\n", arg_bug_msg.argv[0]);
+  //sprint("Application: %s\n", arg_bug_msg.argv[0]);
+  sprint("hartid = %d: Application: %s\n", id, arg_bug_msg.argv[id]);
 
   //elf loading. elf_ctx is defined in kernel/elf.h, used to track the loading process.
   elf_ctx elfloader;
@@ -432,7 +436,7 @@ void load_bincode_from_host_elf(process *p) {
   elf_info info;
 
   //info.f = spike_file_open(arg_bug_msg.argv[0], O_RDONLY, 0);
-  info.f = vfs_open(arg_bug_msg.argv[0], O_RDONLY);
+  info.f = vfs_open(arg_bug_msg.argv[id], O_RDONLY);
   info.p = p;
   // IS_ERR_VALUE is a macro defined in spike_interface/spike_htif.h
   //if (IS_ERR_VALUE(info.f)) panic("Fail on openning the input application program.\n");
@@ -451,13 +455,17 @@ void load_bincode_from_host_elf(process *p) {
   // entry (virtual, also physical in lab1_x) address
   p->trapframe->epc = elfloader.ehdr.entry;
 
-  //find debug_line
-  get_debug_line(&elfloader);
 
+  if(!strcmp(arg_bug_msg.argv[id], "bin/app_errorline")){
+     //find debug_line
+    //sprint("HHHHHH\n");
+    get_debug_line(&elfloader);
+  }
+ 
   // close the host spike file
   vfs_close(info.f);
 
-  sprint("Application program entry point (virtual address): 0x%lx\n", p->trapframe->epc);
+  sprint("hartid = %d: Application program entry point (virtual address): 0x%lx\n", id, p->trapframe->epc);
 }
 
 int sys_exec(const char * addr, const char * para){
@@ -465,14 +473,15 @@ int sys_exec(const char * addr, const char * para){
 
   //sprint("process_pid: %d\n", current->pid);
   //sprint("This is exec!\n");
-  clear_process(current);
+  int id = read_tp();
+  clear_process(user_app[id]);
 
   elf_ctx elfloader;
   elf_info info;
 
   //open the ELF_file
   info.f = vfs_open(addr, O_RDONLY);
-  info.p = current;
+  info.p = user_app[id];
   if(info.f == NULL){
     sprint("EXEC:Fail on openning the input application program.\n");
     return -1;
@@ -495,23 +504,20 @@ int sys_exec(const char * addr, const char * para){
   
 
   // entry (virtual, also physical in lab1_x) address
-  current->trapframe->epc = elfloader.ehdr.entry;
-
-  //find debug_line
-  get_debug_line(&elfloader);
+  user_app[id]->trapframe->epc = elfloader.ehdr.entry;
 
   // close the host spike file
   vfs_close(info.f);
 
-  sprint("Application program entry point (virtual address): 0x%lx\n", current->trapframe->epc);
+  sprint("Application program entry point (virtual address): 0x%lx\n", user_app[id]->trapframe->epc);
 
   //reset the stack
-  current->trapframe->regs.sp = USER_STACK_TOP;
+  user_app[id]->trapframe->regs.sp = USER_STACK_TOP;
   //store the para
   //copy the para to the stack top
-  ssize_t * sp_va_addr = (ssize_t *)current->trapframe->regs.sp;
+  ssize_t * sp_va_addr = (ssize_t *)user_app[id]->trapframe->regs.sp;
   sp_va_addr -= 8;
-  ssize_t *sp_pa_addr = (ssize_t *)user_va_to_pa(current->pagetable, sp_va_addr);
+  ssize_t *sp_pa_addr = (ssize_t *)user_va_to_pa(user_app[id]->pagetable, sp_va_addr);
   memcpy(sp_pa_addr, para, strlen(para) + 1);
 
   //sprint("this is copy_after:%s\n sp_pa:%x sp_va: %x\n",sp_pa_addr, sp_pa_addr, sp_va_addr);
@@ -525,9 +531,9 @@ int sys_exec(const char * addr, const char * para){
   //sprint("sp: %d, sp_va: %d\n", user_va_to_pa(current->pagetable, (void *)(current->trapframe->regs.sp)),sp_va_addr);
 
   //init the regs
-  current->trapframe->regs.sp = (uint64)sp_va_addr;
-  current->trapframe->regs.a0 = (uint64)1;
-  current->trapframe->regs.a1 = (uint64)sp_va_addr;
+  user_app[id]->trapframe->regs.sp = (uint64)sp_va_addr;
+  user_app[id]->trapframe->regs.a0 = (uint64)1;
+  user_app[id]->trapframe->regs.a1 = (uint64)sp_va_addr;
   
   return 1;
 }

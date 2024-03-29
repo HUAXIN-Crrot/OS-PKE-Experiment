@@ -189,4 +189,46 @@ int print_backtrace(int depth) {
   return do_user_call(SYS_print_backtrace, depth, 0, 0, 0, 0, 0, 0);
 }
 
+//
+//lab2_challenge2
+//
+void* better_malloc(int n){
+  return (void *)do_user_call(SYS_better_malloc, n, 0, 0, 0, 0, 0, 0);
+}
+
+void better_free(void* va){
+  do_user_call(SYS_better_free, (uint64)va, 0, 0, 0, 0, 0, 0);
+}
+
+int sem_new(int n){
+  return do_user_call(SYS_user_sem_new, n, 0, 0, 0, 0, 0, 0);
+}
+
+int sem_P(int n){
+  return do_user_call(SYS_user_sem_P, n, 0, 0, 0, 0, 0, 0);
+}
+
+int sem_V(int n){
+  return do_user_call(SYS_user_sem_V, n, 0, 0, 0, 0, 0, 0);
+}
+
+void printpa(int* va)
+{
+  do_user_call(SYS_user_printpa, (uint64)va, 0, 0, 0, 0, 0, 0);
+}
+
+//
+// lib call to read present working directory (pwd)
+//
+int read_cwd(char *path) {
+  return do_user_call(SYS_user_rcwd, (uint64)path, 0, 0, 0, 0, 0, 0);
+}
+
+//
+// lib call to change pwd
+//
+int change_cwd(const char *path) {
+  return do_user_call(SYS_user_ccwd, (uint64)path, 0, 0, 0, 0, 0, 0);
+}
+
 

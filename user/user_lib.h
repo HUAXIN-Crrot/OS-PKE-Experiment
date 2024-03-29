@@ -40,4 +40,20 @@ int wait(int pid);
 
 //lab1-challenge1
 int print_backtrace(int depth);
+
+void* better_malloc(int n);
+
+void better_free(void* va);
+
+//lab3-challenge2
+int sem_new(int n);
+int sem_P(int n);
+int sem_V(int n);
+
+//lab3-challeng3
+void printpa(int* va);
+
+//lab4-challenge1
+int read_cwd(char *path);
+int change_cwd(const char *path);
 #endif

@@ -10,6 +10,7 @@
 #include "vmm.h"
 #include "sched.h"
 #include "util/functions.h"
+#include "string.h"
 
 #include "spike_interface/spike_utils.h"
 
@@ -32,16 +33,18 @@ static void handle_syscall(trapframe *tf) {
 
 //
 // global variable that store the recorded "ticks". added @lab1_3
-static uint64 g_ticks = 0;
+//static uint64 g_ticks = 0;
+static uint64 g_ticks[2] = {0};
 //
 // added @lab1_3
 //
 void handle_mtimer_trap() {
-  sprint("Ticks %d\n", g_ticks);
+  int id = read_tp();
+  sprint("Ticks %d\n", g_ticks[id]);
   // TODO (lab1_3): increase g_ticks to record this "tick", and then clear the "SIP"
   // field in sip register.
   // hint: use write_csr to disable the SIP_SSIP bit in sip.
-  g_ticks++;
+  g_ticks[id]++;
   write_csr(sip, 0);
 
 }
@@ -52,16 +55,36 @@ void handle_mtimer_trap() {
 // stval: the virtual address that causes pagefault when being accessed.
 //
 void handle_user_page_fault(uint64 mcause, uint64 sepc, uint64 stval) {
+  int id = read_tp();
   sprint("handle_page_fault: %lx\n", stval);
+  pte_t *pte;
   switch (mcause) {
     case CAUSE_STORE_PAGE_FAULT:
       // TODO (lab2_3): implement the operations that solve the page fault to
       // dynamically increase application stack.
       // hint: first allocate a new physical page, and then, maps the new page to the
       // virtual address that causes the page fault.
-       if(stval < current->trapframe->regs.sp - PGSIZE) panic("this address is not available!");
+
+      //find the pte
+      pte = page_walk(user_app[id]->pagetable, stval, 0);
+
+      //copy on write
+      if(((*pte) & 0x100)){
+        void* child_pa = alloc_page();
+        //sprint("This is stval:%lx, This is child_pa:%lx\n", stval, (uint64)child_pa);
+        memcpy(child_pa, (void*)lookup_pa(user_app[id]->parent->pagetable, stval), PGSIZE);
+        //unmap the origin
+        user_vm_unmap(user_app[id]->pagetable, stval, PGSIZE, 0);
+        
+        //new mapping
+        user_vm_map((pagetable_t)user_app[id]->pagetable, stval, PGSIZE, (uint64)child_pa,
+                    prot_to_type(PROT_READ | PROT_WRITE, 1));
+      }else{
+        if(stval < user_app[id]->trapframe->regs.sp - PGSIZE) panic("this address is not available!");
        map_pages(
-        current->pagetable,ROUNDDOWN(stval,PGSIZE),PGSIZE,(uint64)alloc_page(),prot_to_type(PROT_READ|PROT_WRITE,1));
+        user_app[id]->pagetable,ROUNDDOWN(stval,PGSIZE),PGSIZE,(uint64)alloc_page(),prot_to_type(PROT_READ|PROT_WRITE,1));
+      }
+      break;
 
 
       break;
@@ -75,17 +98,18 @@ void handle_user_page_fault(uint64 mcause, uint64 sepc, uint64 stval) {
 // implements round-robin scheduling. added @lab3_3
 //
 void rrsched() {
+  int id = read_tp();
   // TODO (lab3_3): implements round-robin scheduling.
   // hint: increase the tick_count member of current process by one, if it is bigger than
   // TIME_SLICE_LEN (means it has consumed its time slice), change its status into READY,
   // place it in the rear of ready queue, and finally schedule next process to run.
-  if( current->tick_count + 1 >= TIME_SLICE_LEN ){
-        current->tick_count = 0;
-        current->status = READY;
-        insert_to_ready_queue( current );
+  if( user_app[id]->tick_count + 1 >= TIME_SLICE_LEN ){
+        user_app[id]->tick_count = 0;
+        user_app[id]->status = READY;
+        insert_to_ready_queue( user_app[id] );
         schedule();
     }else{
-        current->tick_count ++;
+        user_app[id]->tick_count ++;
     }
 
 }
@@ -95,13 +119,14 @@ void rrsched() {
 // in S-mode.
 //
 void smode_trap_handler(void) {
+  int id = read_tp();
   // make sure we are in User mode before entering the trap handling.
   // we will consider other previous case in lab1_3 (interrupt).
   if ((read_csr(sstatus) & SSTATUS_SPP) != 0) panic("usertrap: not from user mode");
 
-  assert(current);
+  assert(user_app[id]);
   // save user process counter.
-  current->trapframe->epc = read_csr(sepc);
+  user_app[id]->trapframe->epc = read_csr(sepc);
 
   // if the cause of trap is syscall from user application.
   // read_csr() and CAUSE_USER_ECALL are macros defined in kernel/riscv.h
@@ -110,7 +135,7 @@ void smode_trap_handler(void) {
   // use switch-case instead of if-else, as there are many cases since lab2_3.
   switch (cause) {
     case CAUSE_USER_ECALL:
-      handle_syscall(current->trapframe);
+      handle_syscall(user_app[id]->trapframe);
       break;
     case CAUSE_MTIMER_S_TRAP:
       handle_mtimer_trap();
@@ -131,5 +156,7 @@ void smode_trap_handler(void) {
   }
 
   // continue (come back to) the execution of current process.
-  switch_to(current);
+  //sprint("Now is smodetrap!\n");
+  //sprint("This is hartid:%d this is process->pid:%d \n", id, user_app[id]->pid);
+  switch_to(user_app[id]);
 }
